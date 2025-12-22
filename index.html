@@ -7,7 +7,6 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
     <style>
@@ -22,9 +21,9 @@
             background: white; 
             padding: 20px; 
             border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(76, 29, 149, 0.2); /* SheGo Purple Shadow */
+            box-shadow: 0 10px 25px rgba(76, 29, 149, 0.2);
             z-index: 1000;
-            border-left: 5px solid #4C1D95; /* SheGo Purple Accent */
+            border-left: 5px solid #4C1D95;
         }
 
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
@@ -57,18 +56,17 @@
     </div>
 
     <script>
-        // ---------------------------------------------------------
-        // 1. CONFIGURATION (Paste your keys here!)
-        // ---------------------------------------------------------
+        // 1. FIX: UNPACK THE SUPABASE TOOL (This was the missing line!)
+        const { createClient } = supabase;
+
+        // 2. CONFIGURATION
         const SUPABASE_URL = "https://cpqnueuiqxknqusavyep.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwcW51ZXVpcXhrbnF1c2F2eWVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5MTk1MzQsImV4cCI6MjA3OTQ5NTUzNH0.GCbBvZs6XImoEMX5gOYnbLbKwC2TyW7AcD4VL4fUXC4";
 
-        // ---------------------------------------------------------
-
         // Initialize Supabase
-        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // Initialize Map (Default: South Africa View)
+        // Initialize Map
         const map = L.map('map').setView([-29.0, 24.0], 5); 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
@@ -76,14 +74,13 @@
 
         // Custom Car Icon
         const carIcon = L.icon({
-            iconUrl: 'https://cdn-icons-png.flaticon.com/512/75/75104.png', // Simple Car Icon
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/75/75104.png',
             iconSize: [40, 40],
             iconAnchor: [20, 20],
         });
 
         let marker = null;
 
-        // Get Driver ID from URL (e.g. ?id=123)
         const urlParams = new URLSearchParams(window.location.search);
         const driverId = urlParams.get('id');
 
@@ -99,9 +96,9 @@
             console.log("Starting track for:", id);
 
             // A. Get Initial Location
-            const { data: driver, error } = await supabase
+            const { data: driver, error } = await _supabase
                 .from('driver_profiles')
-                .select('first_name, vehicle_info, current_lat, current_long') // Fetch specific fields
+                .select('first_name, vehicle_info, current_lat, current_long')
                 .eq('id', id)
                 .single();
 
@@ -109,7 +106,7 @@
             if (driver) updateMap(driver);
 
             // B. Subscribe to Live Updates
-            const channel = supabase
+            const channel = _supabase
                 .channel('public:driver_profiles')
                 .on('postgres_changes', 
                     { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
@@ -126,26 +123,22 @@
             const lng = data.current_long;
 
             if (lat && lng) {
-                // Update Text Info
                 if (data.first_name) document.getElementById('driverName').innerText = `Driver: ${data.first_name}`;
                 
-                // Parse vehicle info if it's a JSON object or string
                 let vehicleText = "SheGo Vehicle";
                 if (data.vehicle_info) {
-                    // Handle cases where vehicle_info might be an object or a string
+                    // Check if it's already an object or a string
                     const v = typeof data.vehicle_info === 'string' ? JSON.parse(data.vehicle_info) : data.vehicle_info;
                     if (v.make && v.plate) vehicleText = `${v.make} (${v.plate})`;
                 }
                 document.getElementById('carDetails').innerText = vehicleText;
 
-                // Move Marker
                 if (marker) {
                     marker.setLatLng([lat, lng]);
                 } else {
                     marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
                 }
                 
-                // Pan map to car
                 map.setView([lat, lng], 16);
             }
         }
