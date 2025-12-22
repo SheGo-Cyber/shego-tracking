@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>SheGo Live Tracker</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
@@ -10,93 +11,132 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 100vh; width: 100%; }
-        .info-box {
-            position: absolute; bottom: 20px; left: 20px; right: 20px;
-            background: white; padding: 15px; border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000;
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        
+        .info-card {
+            position: absolute; 
+            bottom: 30px; 
+            left: 20px; 
+            right: 20px;
+            background: white; 
+            padding: 20px; 
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(76, 29, 149, 0.2); /* SheGo Purple Shadow */
+            z-index: 1000;
+            border-left: 5px solid #4C1D95; /* SheGo Purple Accent */
         }
-        .status { color: #059669; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 5px; }
-        .dot { width: 10px; height: 10px; background: #059669; border-radius: 50%; animation: pulse 1.5s infinite; }
-        h2 { margin: 5px 0; color: #4C1D95; }
-        p { margin: 0; color: #6B7280; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .status-badge { 
+            background: #DEF7EC; color: #03543F; 
+            padding: 4px 10px; border-radius: 12px; 
+            font-size: 12px; font-weight: bold; 
+            display: flex; align-items: center; gap: 5px;
+        }
+        .pulsing-dot { width: 8px; height: 8px; background: #059669; border-radius: 50%; animation: pulse 1.5s infinite; }
+        
+        h2 { margin: 0; color: #1F2937; font-size: 18px; }
+        p { margin: 5px 0 0; color: #6B7280; font-size: 14px; }
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
     
-    <div class="info-box">
-        <div class="status"><div class="dot"></div> LIVE TRACKING ACTIVE</div>
-        <h2 id="driverName">Finding Driver...</h2>
-        <p id="carDetails">Please wait for signal...</p>
+    <div class="info-card">
+        <div class="header">
+            <h2 id="driverName">Searching...</h2>
+            <div class="status-badge">
+                <div class="pulsing-dot"></div> LIVE
+            </div>
+        </div>
+        <p id="carDetails">Connecting to SheGo network...</p>
     </div>
 
     <script>
-        // --- CONFIGURATION ---
-        const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
-        const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
-        
+        // ---------------------------------------------------------
+        // 1. CONFIGURATION (Paste your keys here!)
+        // ---------------------------------------------------------
+        const SUPABASE_URL = "https://cpqnueuiqxknqusavyep.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwcW51ZXVpcXhrbnF1c2F2eWVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5MTk1MzQsImV4cCI6MjA3OTQ5NTUzNH0.GCbBvZs6XImoEMX5gOYnbLbKwC2TyW7AcD4VL4fUXC4";
+
+        // ---------------------------------------------------------
+
         // Initialize Supabase
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        // Initialize Map
-        const map = L.map('map').setView([-26.2041, 28.0473], 13); // Default to JHB
+        // Initialize Map (Default: South Africa View)
+        const map = L.map('map').setView([-29.0, 24.0], 5); 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        // Driver Marker Icon
+        // Custom Car Icon
         const carIcon = L.icon({
-            iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', // Purple Car Icon
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/75/75104.png', // Simple Car Icon
             iconSize: [40, 40],
             iconAnchor: [20, 20],
         });
 
         let marker = null;
 
-        // Get Driver ID from URL (e.g., tracking.html?id=12345)
+        // Get Driver ID from URL (e.g. ?id=123)
         const urlParams = new URLSearchParams(window.location.search);
         const driverId = urlParams.get('id');
 
         if (!driverId) {
-            document.getElementById('driverName').innerText = "Invalid Link";
-            document.getElementById('carDetails').innerText = "No tracking ID provided.";
+            document.getElementById('driverName').innerText = "Link Expired";
+            document.getElementById('carDetails').innerText = "No tracking ID found.";
+            document.querySelector('.pulsing-dot').style.backgroundColor = 'red';
         } else {
             startTracking(driverId);
         }
 
         async function startTracking(id) {
-            // 1. Fetch Initial Data
-            const { data: driver } = await supabase
+            console.log("Starting track for:", id);
+
+            // A. Get Initial Location
+            const { data: driver, error } = await supabase
                 .from('driver_profiles')
-                .select('*')
+                .select('first_name, vehicle_info, current_lat, current_long') // Fetch specific fields
                 .eq('id', id)
                 .single();
 
+            if (error) console.error("Error fetching driver:", error);
             if (driver) updateMap(driver);
 
-            // 2. Subscribe to Realtime Updates
-            supabase
+            // B. Subscribe to Live Updates
+            const channel = supabase
                 .channel('public:driver_profiles')
-                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
-                (payload) => {
-                    updateMap(payload.new);
-                })
+                .on('postgres_changes', 
+                    { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
+                    (payload) => {
+                        console.log("Movement detected!", payload.new);
+                        updateMap(payload.new);
+                    }
+                )
                 .subscribe();
         }
 
-        function updateMap(driver) {
-            const lat = driver.current_lat;
-            const lng = driver.current_long;
+        function updateMap(data) {
+            const lat = data.current_lat;
+            const lng = data.current_long;
 
             if (lat && lng) {
-                // Update Text
-                document.getElementById('driverName').innerText = `Driver: ${driver.first_name || 'SheGo Driver'}`;
-                // You might need to fetch vehicle details separately or pass them in URL if critical
-                document.getElementById('carDetails').innerText = "Vehicle is moving...";
+                // Update Text Info
+                if (data.first_name) document.getElementById('driverName').innerText = `Driver: ${data.first_name}`;
+                
+                // Parse vehicle info if it's a JSON object or string
+                let vehicleText = "SheGo Vehicle";
+                if (data.vehicle_info) {
+                    // Handle cases where vehicle_info might be an object or a string
+                    const v = typeof data.vehicle_info === 'string' ? JSON.parse(data.vehicle_info) : data.vehicle_info;
+                    if (v.make && v.plate) vehicleText = `${v.make} (${v.plate})`;
+                }
+                document.getElementById('carDetails').innerText = vehicleText;
 
                 // Move Marker
                 if (marker) {
@@ -105,7 +145,7 @@
                     marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
                 }
                 
-                // Pan Map
+                // Pan map to car
                 map.setView([lat, lng], 16);
             }
         }
