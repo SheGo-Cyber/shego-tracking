@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SheGo Live Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        .info-box {
+            position: absolute; bottom: 20px; left: 20px; right: 20px;
+            background: white; padding: 15px; border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000;
+        }
+        .status { color: #059669; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 5px; }
+        .dot { width: 10px; height: 10px; background: #059669; border-radius: 50%; animation: pulse 1.5s infinite; }
+        h2 { margin: 5px 0; color: #4C1D95; }
+        p { margin: 0; color: #6B7280; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    
+    <div class="info-box">
+        <div class="status"><div class="dot"></div> LIVE TRACKING ACTIVE</div>
+        <h2 id="driverName">Finding Driver...</h2>
+        <p id="carDetails">Please wait for signal...</p>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
+        const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
+        
+        // Initialize Supabase
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // Initialize Map
+        const map = L.map('map').setView([-26.2041, 28.0473], 13); // Default to JHB
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Driver Marker Icon
+        const carIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', // Purple Car Icon
+            iconSize: [40, 40],
+            iconAnchor: [20, 20],
+        });
+
+        let marker = null;
+
+        // Get Driver ID from URL (e.g., tracking.html?id=12345)
+        const urlParams = new URLSearchParams(window.location.search);
+        const driverId = urlParams.get('id');
+
+        if (!driverId) {
+            document.getElementById('driverName').innerText = "Invalid Link";
+            document.getElementById('carDetails').innerText = "No tracking ID provided.";
+        } else {
+            startTracking(driverId);
+        }
+
+        async function startTracking(id) {
+            // 1. Fetch Initial Data
+            const { data: driver } = await supabase
+                .from('driver_profiles')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (driver) updateMap(driver);
+
+            // 2. Subscribe to Realtime Updates
+            supabase
+                .channel('public:driver_profiles')
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
+                (payload) => {
+                    updateMap(payload.new);
+                })
+                .subscribe();
+        }
+
+        function updateMap(driver) {
+            const lat = driver.current_lat;
+            const lng = driver.current_long;
+
+            if (lat && lng) {
+                // Update Text
+                document.getElementById('driverName').innerText = `Driver: ${driver.first_name || 'SheGo Driver'}`;
+                // You might need to fetch vehicle details separately or pass them in URL if critical
+                document.getElementById('carDetails').innerText = "Vehicle is moving...";
+
+                // Move Marker
+                if (marker) {
+                    marker.setLatLng([lat, lng]);
+                } else {
+                    marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
+                }
+                
+                // Pan Map
+                map.setView([lat, lng], 16);
+            }
+        }
+    </script>
+</body>
+</html>
