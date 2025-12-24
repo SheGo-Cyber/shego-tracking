@@ -15,29 +15,16 @@
         
         .info-card {
             position: absolute; 
-            bottom: 30px; 
-            left: 20px; 
-            right: 20px;
-            background: white; 
-            padding: 20px; 
-            border-radius: 20px;
+            bottom: 30px; left: 20px; right: 20px;
+            background: white; padding: 20px; border-radius: 20px;
             box-shadow: 0 10px 25px rgba(76, 29, 149, 0.2);
-            z-index: 1000;
-            border-left: 5px solid #4C1D95;
+            z-index: 1000; border-left: 5px solid #4C1D95;
         }
-
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
-        .status-badge { 
-            background: #DEF7EC; color: #03543F; 
-            padding: 4px 10px; border-radius: 12px; 
-            font-size: 12px; font-weight: bold; 
-            display: flex; align-items: center; gap: 5px;
-        }
+        .status-badge { background: #DEF7EC; color: #03543F; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; display: flex; align-items: center; gap: 5px; }
         .pulsing-dot { width: 8px; height: 8px; background: #059669; border-radius: 50%; animation: pulse 1.5s infinite; }
-        
         h2 { margin: 0; color: #1F2937; font-size: 18px; }
         p { margin: 5px 0 0; color: #6B7280; font-size: 14px; }
-        
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -56,23 +43,15 @@
     </div>
 
     <script>
-        // 1. FIX: UNPACK THE SUPABASE TOOL (This was the missing line!)
         const { createClient } = supabase;
-
-        // 2. CONFIGURATION
         const SUPABASE_URL = "https://cpqnueuiqxknqusavyep.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwcW51ZXVpcXhrbnF1c2F2eWVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5MTk1MzQsImV4cCI6MjA3OTQ5NTUzNH0.GCbBvZs6XImoEMX5gOYnbLbKwC2TyW7AcD4VL4fUXC4";
 
-        // Initialize Supabase
         const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // Initialize Map
         const map = L.map('map').setView([-29.0, 24.0], 5); 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 
-        // Custom Car Icon
         const carIcon = L.icon({
             iconUrl: 'https://cdn-icons-png.flaticon.com/512/75/75104.png',
             iconSize: [40, 40],
@@ -80,40 +59,44 @@
         });
 
         let marker = null;
-
         const urlParams = new URLSearchParams(window.location.search);
         const driverId = urlParams.get('id');
 
         if (!driverId) {
-            document.getElementById('driverName').innerText = "Link Expired";
-            document.getElementById('carDetails').innerText = "No tracking ID found.";
-            document.querySelector('.pulsing-dot').style.backgroundColor = 'red';
+            updateStatus("Link Error", "No Tracking ID provided.", "red");
         } else {
             startTracking(driverId);
         }
 
         async function startTracking(id) {
-            console.log("Starting track for:", id);
-
             // A. Get Initial Location
             const { data: driver, error } = await _supabase
                 .from('driver_profiles')
-                .select('first_name, vehicle_info, current_lat, current_long')
+                .select('*') // Select ALL to prevent missing column errors
                 .eq('id', id)
                 .single();
 
-            if (error) console.error("Error fetching driver:", error);
-            if (driver) updateMap(driver);
+            if (error) {
+                // SHOW ERROR ON SCREEN
+                console.error("Supabase Error:", error);
+                updateStatus("Connection Failed", `Error: ${error.message || error.code}`, "red");
+                return;
+            }
+
+            if (!driver) {
+                updateStatus("Driver Not Found", "ID exists but no profile found.", "orange");
+                return;
+            }
+
+            // If we got here, RLS is fixed!
+            updateMap(driver);
 
             // B. Subscribe to Live Updates
-            const channel = _supabase
+            _supabase
                 .channel('public:driver_profiles')
                 .on('postgres_changes', 
                     { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
-                    (payload) => {
-                        console.log("Movement detected!", payload.new);
-                        updateMap(payload.new);
-                    }
+                    (payload) => updateMap(payload.new)
                 )
                 .subscribe();
         }
@@ -123,24 +106,34 @@
             const lng = data.current_long;
 
             if (lat && lng) {
-                if (data.first_name) document.getElementById('driverName').innerText = `Driver: ${data.first_name}`;
+                document.getElementById('driverName').innerText = `Driver: ${data.first_name || 'SheGo Driver'}`;
                 
-                let vehicleText = "SheGo Vehicle";
+                let vehicleText = "Vehicle on the move";
                 if (data.vehicle_info) {
-                    // Check if it's already an object or a string
-                    const v = typeof data.vehicle_info === 'string' ? JSON.parse(data.vehicle_info) : data.vehicle_info;
-                    if (v.make && v.plate) vehicleText = `${v.make} (${v.plate})`;
+                     // Safe Parse Logic
+                    try {
+                        const v = typeof data.vehicle_info === 'string' ? JSON.parse(data.vehicle_info) : data.vehicle_info;
+                        if (v.make && v.plate) vehicleText = `${v.make} (${v.plate})`;
+                    } catch (e) {
+                        vehicleText = "Vehicle details unavailable";
+                    }
                 }
                 document.getElementById('carDetails').innerText = vehicleText;
 
-                if (marker) {
-                    marker.setLatLng([lat, lng]);
-                } else {
-                    marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
-                }
+                if (marker) marker.setLatLng([lat, lng]);
+                else marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
                 
                 map.setView([lat, lng], 16);
+            } else {
+                updateStatus("Waiting for Signal", "Driver has no location set yet.", "orange");
             }
+        }
+
+        function updateStatus(title, message, color) {
+            document.getElementById('driverName').innerText = title;
+            document.getElementById('carDetails').innerText = message;
+            const dot = document.querySelector('.pulsing-dot');
+            if(dot) dot.style.backgroundColor = color;
         }
     </script>
 </body>
