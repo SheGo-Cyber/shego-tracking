@@ -74,7 +74,7 @@
                 .from('driver_profiles')
                 .select('*') // Select ALL to prevent missing column errors
                 .eq('id', id)
-                .single();
+                .maybeSingle();
 
             if (error) {
                 // SHOW ERROR ON SCREEN
