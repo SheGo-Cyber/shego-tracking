@@ -14,8 +14,7 @@
         #map { height: 100vh; width: 100%; z-index: 1; }
         
         .info-card {
-            position: absolute; 
-            bottom: 30px; left: 20px; right: 20px;
+            position: absolute; bottom: 30px; left: 20px; right: 20px;
             background: white; padding: 20px; border-radius: 20px;
             box-shadow: 0 10px 25px rgba(76, 29, 149, 0.2);
             z-index: 1000; border-left: 5px solid #4C1D95;
@@ -43,12 +42,13 @@
     </div>
 
     <script>
+        // 1. Setup Supabase
         const { createClient } = supabase;
         const SUPABASE_URL = "https://cpqnueuiqxknqusavyep.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwcW51ZXVpcXhrbnF1c2F2eWVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5MTk1MzQsImV4cCI6MjA3OTQ5NTUzNH0.GCbBvZs6XImoEMX5gOYnbLbKwC2TyW7AcD4VL4fUXC4";
-
         const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // 2. Setup Map
         const map = L.map('map').setView([-29.0, 24.0], 5); 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 
@@ -69,34 +69,41 @@
         }
 
         async function startTracking(id) {
-            // A. Get Initial Location
+            // 3. THE FIX: SEARCH BOTH COLUMNS using .or()
+            // This says: "Find the row where id matches OR user_id matches"
             const { data: driver, error } = await _supabase
                 .from('driver_profiles')
-                .select('*') // Select ALL to prevent missing column errors
-                .eq('id', id)
+                .select('*')
+                .or(`id.eq.${id},user_id.eq.${id}`)  // <--- KEY FIX HERE
                 .maybeSingle();
 
             if (error) {
-                // SHOW ERROR ON SCREEN
                 console.error("Supabase Error:", error);
-                updateStatus("Connection Failed", `Error: ${error.message || error.code}`, "red");
+                updateStatus("Connection Failed", "Retrying...", "orange");
                 return;
             }
 
             if (!driver) {
-                updateStatus("Driver Not Found", "ID exists but no profile found.", "orange");
+                updateStatus("Driver Not Found", "Waiting for location...", "orange");
                 return;
             }
 
-            // If we got here, RLS is fixed!
+            // Initial Update
             updateMap(driver);
 
-            // B. Subscribe to Live Updates
+            // 4. Subscribe to Realtime Updates
+            // We subscribe to changes where EITHER id matches
+            // (Note: Realtime filters are simpler, so we'll just listen to the table and filter in JS to be safe)
             _supabase
                 .channel('public:driver_profiles')
                 .on('postgres_changes', 
-                    { event: 'UPDATE', schema: 'public', table: 'driver_profiles', filter: `id=eq.${id}` }, 
-                    (payload) => updateMap(payload.new)
+                    { event: 'UPDATE', schema: 'public', table: 'driver_profiles' }, 
+                    (payload) => {
+                        // Only update if the changed row matches our driver
+                        if (payload.new.id === driver.id || payload.new.user_id === driver.user_id) {
+                            updateMap(payload.new);
+                        }
+                    }
                 )
                 .subscribe();
         }
@@ -108,22 +115,24 @@
             if (lat && lng) {
                 document.getElementById('driverName').innerText = `Driver: ${data.first_name || 'SheGo Driver'}`;
                 
-                let vehicleText = "Vehicle on the move";
-                if (data.vehicle_info) {
-                     // Safe Parse Logic
-                    try {
-                        const v = typeof data.vehicle_info === 'string' ? JSON.parse(data.vehicle_info) : data.vehicle_info;
-                        if (v.make && v.plate) vehicleText = `${v.make} (${v.plate})`;
-                    } catch (e) {
-                        vehicleText = "Vehicle details unavailable";
-                    }
+                // Updated to use fields present in your actual schema
+                let details = "SheGo Active Trip";
+                if (data.license_number) {
+                    details = `Lic: ${data.license_number}`; 
                 }
-                document.getElementById('carDetails').innerText = vehicleText;
+                // If you add vehicle_model later, you can add it back here
+                
+                document.getElementById('carDetails').innerText = details;
 
                 if (marker) marker.setLatLng([lat, lng]);
                 else marker = L.marker([lat, lng], {icon: carIcon}).addTo(map);
                 
                 map.setView([lat, lng], 16);
+                
+                // Reset dot color to green
+                const dot = document.querySelector('.pulsing-dot');
+                if(dot) dot.style.backgroundColor = '#059669';
+                
             } else {
                 updateStatus("Waiting for Signal", "Driver has no location set yet.", "orange");
             }
